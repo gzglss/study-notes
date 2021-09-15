@@ -21,7 +21,7 @@ def mask_(x,mask,pad=0):
     return x_mask
     
 class MultiHeadAttention(tf.keras.layers.Layer):
-    def __init__(self,d_model,head_num,scale=True,**kwargs):
+    def __init__(self,d_model,head_num,scale=True,dropout=0.2,**kwargs):
         super(MultiHeadAttention,self).__init__()
         self.h=head_num
         self.d_model=d_model
@@ -30,17 +30,21 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         self.h=head_num
         self.head_num=head_num
         self.scale=scale
-        self.dense=Dense(self.d)
+        self.dense_q=Dense(self.d)
+        self.dense_k=Dense(self.d)
+        self.dense_v=Dense(self.d)
+        self.dropout_rate=dropout
+        self.dropout=Dropout(dropout)
         
     def build(self,input_shape):
         super(MultiHeadAttention,self).build(input_shape)
         
-    def call(self,x,mask=None):
+    def call(self,x,mask=None,dropout=None):
         x_h=tf.reshape(x,(x.shape[0],x.shape[1],self.h,self.d))
         x_h=tf.transpose(x_h,[0,2,1,3])#[batch_size,head_num,seq_len,d]
-        q=self.dense(x_h)#[batch_size,head_num,seq_len,d]
-        k=self.dense(x_h)
-        v=self.dense(x_h)
+        q=self.dense_q(x_h)#[batch_size,head_num,seq_len,d]
+        k=self.dense_k(x_h)
+        v=self.dense_v(x_h)
         kt=tf.transpose(k,[0,1,3,2])
         qkt=tf.matmul(q,kt)#[batch_size,head_num,seq_len,seq_len]
         if self.scale:
@@ -48,6 +52,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         if mask is not None:
             qkt=mask_(qkt,mask)
         qkt=tf.nn.softmax(qkt)#[batch_size,head_num,seq_len,seq_len]
+        if dropout is not None:
+            qkt=self.dropout(qkt)
         a=tf.matmul(qkt,x_h)#[batch_size,head_num,seq_len,d]
         a=tf.reshape(a,(x.shape[0],x.shape[1],self.d_model))#[batch_size,seq_len,d_model]
         return a
@@ -56,7 +62,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         config=super(MultiHeadAttention,self).get_config()
         config.update({'d_model':self.d_model,
                       'head_num':self.head_num,
-                      'scale':self.scale})
+                      'scale':self.scale,
+                      'dropout':self.dropout_rate})
         return config
 
 #eg      
