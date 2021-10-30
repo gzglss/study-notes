@@ -1,5 +1,9 @@
 '''
 原论文的代码实现
+论文标题：
+When in Doubt: Improving Classification Performance with Alternating Normalization
+论文链接：
+https://arxiv.org/abs/2109.13449
 '''
 
 
