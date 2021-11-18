@@ -1,3 +1,5 @@
+#相似句子生成
+
 from sentence_transformers import SentenceTransformer, LoggingHandler
 from sentence_transformers import models, util, datasets, evaluation, losses
 from torch.utils.data import DataLoader
