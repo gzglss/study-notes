@@ -1,30 +1,16 @@
-def longesthuiwensubs(s):
-	dp=[[0]*len(s) for _ in range(len(s))]
-	#base case
-	for i in range(len(s)):
-		for j in range(len(s)):
-			if i==j:
-				dp[i][j]=1
-			if i<j:
-				dp[i][j]=0
-
-	#dp
-	huiwensub=s[0]
-	max_len=1
-	for i in range(len(s)-2,0,-1):
-		for j in range(i+1,len(s)):
-			if s[i]!=s[j]:
-				dp[i][j]=0
-			else:
-				a=max(dp[i][j-1],dp[i+1][j-1],dp[i+1][j])
-				if a>0:
-					dp[i][j]=j+1-i
-					if dp[i][j]>max_len:
-						max_len=dp[i][j]
-						huiwensub=s[i:j+1]
-				else:
-					dp[i][j]=0
-
-	return huiwensub
-s='ABCDZJUDCBA'
-print(longesthuiwensubs(s))
+def longestPalindrome(self, s: str) -> str:
+    dp=[[0 for _ in range(len(s))] for _ in range(len(s))]
+    for i in range(len(s)):
+        dp[i][i]=1
+    maxlen=1
+    mlstr=s[0]
+    for i in range(len(s)-2,-1,-1):
+        for j in range(i+1,len(s)):
+            if s[j]==s[i] and dp[i+1][j-1]==j-i-1:
+                dp[i][j]=dp[i+1][j-1]+2
+            else:
+                dp[i][j]=dp[i+1][j]
+            if dp[i][j]>maxlen:
+                maxlen=dp[i][j]
+                mlstr=s[j-dp[i][j]+1:j+1]
+    return mlstr
