@@ -41,3 +41,28 @@ def longestPalindrome(self, s: str) -> str:
                 maxlen=l
                 mlstr=s[i:j+1]
     return mlstr
+
+
+#中心扩展法
+#以每个元素作为中心，想两端同时增减
+#base case：单个元素开始  or  双元素开始
+def longestPalindrome(self, s: str) -> str:
+    def expand(l,r):
+        while l>=0 and r<len(s) and s[l]==s[r] :
+            l-=1
+            r+=1
+        slen=r-l-1
+        return slen,s[l+1:r]
+
+    maxlen=1
+    s0=s[0]
+    for i in range(len(s)):
+        slen1,s1=expand(i,i)
+        slen2,s2=expand(i,i+1)
+        if slen1>slen2 and slen1>maxlen:
+            maxlen=slen1
+            s0=s1
+        elif slen1<=slen2 and slen2>maxlen:
+            maxlen=slen2
+            s0=s2
+    return s0
