@@ -6,7 +6,7 @@ from scipy.misc import derivative
 #focal loss
 #LGB+Focal Loss 其中alpha：为不能让容易分类类别的损失函数太小, 默认值0.25；
 #gamma：更加关注困难样本 即关注y=1的样本 默认值2
-def focal_loss_lgb_sk( y_pred,dtrain, alpha=0.25, gamma=2):
+def focal_loss( y_pred,dtrain, alpha=0.25, gamma=2):
     label = dtrain.get_label()
     a,g = alpha, gamma
     def fl(x,t):
@@ -18,7 +18,7 @@ def focal_loss_lgb_sk( y_pred,dtrain, alpha=0.25, gamma=2):
     return grad, hess
 
 #自定义f1评价指标
-def f1_score_vali(preds, data_vali):
+def f1_score(preds, data_vali):
     labels = data_vali.get_label()
     preds = np.argmax(preds.reshape(4, -1), axis=0)
     score_vali = f1_score(y_true=labels, y_pred=preds, average='macro')
@@ -47,8 +47,8 @@ gbm = lgb.train(params,
                 num_boost_round=2000, 
           	verbose_eval=100, 
           	early_stopping_rounds=200,
-                fobj=focal_loss_lgb_sk,
-                feval=f1_score_vali,)
+                fobj=focal_loss,
+                feval=f1_score,)
 
 #fobj：自定义损失函数
 #feval：自定义评价指标
