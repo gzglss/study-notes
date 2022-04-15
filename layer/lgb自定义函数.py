@@ -48,8 +48,7 @@ gbm = lgb.train(params,
           	verbose_eval=100, 
           	early_stopping_rounds=200,
                 fobj=focal_loss_lgb_sk,
-                feval=f1_score_vali,
-                valid_sets=lgb_eval)
+                feval=f1_score_vali,)
 
 #fobj：自定义损失函数
 #feval：自定义评价指标
