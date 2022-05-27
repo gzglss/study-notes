@@ -58,6 +58,7 @@ class SegmentTree:
         return v
 
     def pushup(self,node):
+        #之所以回溯的是最大值，是因为该题要求区间内的最大高度
         node.v=max(node.left.v,node.right.v)
 
     def pushdown(self,node):
