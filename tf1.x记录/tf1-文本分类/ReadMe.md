@@ -13,8 +13,8 @@
 
 结果：
 
-| 下游网络    | batch_size | lr     | acc   |
-|---------|------------|--------|-------|
-| textcnn | 256        | warmup | 0.808 |
-| bilstm  | 128        | warmup | 0.889 |
+| 下游网络    | batch_size | lr | epoch | acc   |
+|---------|------------|------|-------|-------|
+| textcnn | 256        | warmup| 5     | 0.808 |
+| bilstm  | 128        | warmup| 5     | 0.889 |
 
