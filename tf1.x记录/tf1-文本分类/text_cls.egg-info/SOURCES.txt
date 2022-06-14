@@ -1,4 +1,5 @@
 setup.py
+code/LexiconBertModel.py
 code/__init__.py
 code/best_exporter.py
 code/data_progress.py

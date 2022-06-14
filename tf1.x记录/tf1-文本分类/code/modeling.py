@@ -1207,17 +1207,18 @@ def textcnn_model(input_tensor, num_class, filter_sizes, num_filter, label_ids=N
     textcnn_outs = []
     input_tensor = tf.expand_dims(input_tensor, -1)  # [batch_size,seq_len,emb_size,1]
     with tf.variable_scope('textcnn'):
-        for idx,filter_size in enumerate(filter_sizes):
-            #[filter_width,filter_height,in_channel,out_channel]
-            w_name='w_'+str(idx)
-            #num_filter肯定要大于num_class，效果才好
-            w = tf.get_variable(w_name, shape=[filter_size, emb_size, 1,num_filter],
+        for idx, filter_size in enumerate(filter_sizes):
+            # [filter_width,filter_height,in_channel,out_channel]
+            w_name = 'w_' + str(idx)
+            # num_filter肯定要大于num_class，效果才好
+            w = tf.get_variable(w_name, shape=[filter_size, emb_size, 1, num_filter],
                                 initializer=tf.truncated_normal_initializer(stddev=0.2))
             # b=tf.get_variable("b",shape=[filter_sizes],initializer=tf.zeros_initializer())
             textcnn_out = tf.nn.conv2d(input_tensor, w, strides=[1, 1, 1, 1], padding='VALID')
-            max_pool = tf.nn.max_pool2d(textcnn_out, ksize=[1, textcnn_out.shape[1], 1, 1], strides=[1, 1, 1, 1], padding='VALID')
+            max_pool = tf.nn.max_pool2d(textcnn_out, ksize=[1, textcnn_out.shape[1], 1, 1], strides=[1, 1, 1, 1],
+                                        padding='VALID')
             out = tf.squeeze(max_pool)
-            out = tf.reshape(out,[-1,num_filter])
+            out = tf.reshape(out, [-1, num_filter])
             textcnn_outs.append(out)
         con_out = tf.concat(textcnn_outs, axis=1)
 
@@ -1225,20 +1226,80 @@ def textcnn_model(input_tensor, num_class, filter_sizes, num_filter, label_ids=N
             # w=tf.get_variable("w",shape=[con_out.shape[1],num_class],initializer=tf.truncated_normal_initializer(stddev=0.2))
             # b=tf.get_variable("b",shape=[con_out.shape[1]],initializer=tf.zeros_initializer())
             # logits=tf.nn.xw_plus_b(con_out,w,b)
-            #这里相当于一个线性变化，不需要在dense里定义激活函数，因为会在外面使用softmax
+            # 这里相当于一个线性变化，不需要在dense里定义激活函数，因为会在外面使用softmax
             try:
                 logits = tf.layers.dense(con_out,
                                          units=num_class,
                                          kernel_initializer=tf.truncated_normal_initializer(stddev=0.2))
             except:
-                tf.logging.info("dense happen a error , with the input tensor is %s , and the textcnn out is %s , and the input of textcnn is %s , and the single out is %s" % (con_out,textcnn_outs,input_tensor,out))
+                tf.logging.info(
+                    "dense happen a error , with the input tensor is %s , and the textcnn out is %s , and the input of textcnn is %s , and the single out is %s" % (
+                        con_out, textcnn_outs, input_tensor, out))
             logits = tf.reshape(logits, shape=[-1, num_class])
             proba = tf.nn.softmax(logits)
             log_proba = tf.nn.log_softmax(logits)
             onehot_labels = tf.one_hot(label_ids, depth=num_class)
-            sum_loss = -tf.reduce_sum(onehot_labels * log_proba,axis=-1)
+            sum_loss = -tf.reduce_sum(onehot_labels * log_proba, axis=-1)
             loss = tf.reduce_mean(sum_loss, axis=0, name="softmax_loss")
             pred = tf.argmax(logits, axis=-1)
-            pred=tf.reshape(pred,[-1,1])
+            pred = tf.reshape(pred, [-1, 1])
             pred = tf.cast(pred, dtype=tf.int32)
             return logits, loss, pred, proba
+
+
+def bilstm(input_tensor,label_ids, lstm_unit, keep_prob, dense_unit, num_class):
+    input_shape = get_shape_list(input_tensor)
+    batch_size = input_shape[0]
+    seq_len = input_shape[1]
+    emb_size = input_shape[2]
+
+    if label_ids is None:
+        label_ids = tf.zeros(shape=[batch_size], dtype=tf.int32)
+
+    lstm_input=tf.unstack(input_tensor,seq_len,axis=1)#将input_tensor以第一维拆成列表的形式，列表长度为seq_len
+
+    # def lstm_cell(name):
+    #     cell=tf.nn.rnn_cell.LSTMCell(num_units=lstm_unit,
+    #                                  initializer=tf.truncated_normal_initializer(stddev=0.02),
+    #                                  name=name)
+    #     return cell
+
+    with tf.variable_scope('lstm_layer'):
+        lstm_out_fw = tf.nn.rnn_cell.LSTMCell(num_units=lstm_unit,
+                                              initializer=tf.truncated_normal_initializer(stddev=0.2),
+                                              name='forward_lstm')
+        lstm_out_bw = tf.nn.rnn_cell.LSTMCell(num_units=lstm_unit,
+                                              initializer=tf.truncated_normal_initializer(stddev=0.2),
+                                              name='behind_lstm')
+
+        #当需要多层lstm时
+        # lstm_out_fw=tf.nn.rnn_cell.MultiRNNCell([lstm_cell(name='forward_lstm')],state_is_tuple=True)
+        # lstm_out_bw = tf.nn.rnn_cell.MultiRNNCell([lstm_cell(name='behind_lstm')], state_is_tuple=True)
+
+        fw_init_state = lstm_out_fw.zero_state(batch_size, tf.float32)
+        bw_init_state = lstm_out_bw.zero_state(batch_size, tf.float32)
+        bilstm_out, fw_state, bw_state = tf.nn.static_bidirectional_rnn(cell_fw=lstm_out_fw, cell_bw=lstm_out_bw,
+                                                                        inputs=lstm_input,
+                                                                        initial_state_fw=fw_init_state,
+                                                                        initial_state_bw=bw_init_state,
+                                                                        )
+        out=bilstm_out[-1]
+        out = tf.nn.dropout(out, keep_prob=keep_prob, name='lstm_drop')
+        with tf.variable_scope('dense_layer'):
+            dense_1 = tf.layers.dense(inputs=out,
+                                      units=dense_unit,
+                                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.2),
+                                      name='dense_1',
+                                      activation=tf.nn.tanh)
+            dense_dropout = tf.nn.dropout(dense_1, keep_prob=keep_prob, name='dense_drop')
+            dense_2 = tf.layers.dense(inputs=dense_dropout,
+                                      units=num_class,
+                                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.2),
+                                      name='dense_2')
+            log_logits=tf.nn.log_softmax(dense_2)
+            proba=tf.nn.softmax(dense_2)
+            pred=tf.argmax(proba,axis=-1)
+            one_hot=tf.one_hot(label_ids,depth=num_class)
+            sum_loss=-tf.reduce_sum(one_hot*log_logits,axis=-1)
+            loss=tf.reduce_mean(sum_loss)
+            return loss,pred,proba,dense_2

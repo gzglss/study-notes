@@ -40,14 +40,38 @@ tf.flags.DEFINE_integer('max_seq_len',64,'the max len of seq')
 
 tf.flags.DEFINE_integer('save_checkpoints_steps',1000,'the step for saving checkpoints')
 
+tf.flags.DEFINE_integer('lstm_unit',256,'the unit num of lstm')
+
+tf.flags.DEFINE_integer('dense_unit',512,'the unit num of dense after lstm')
+
 tf.flags.DEFINE_float("init_learning_rate",0.0001,'the init lr')
+
+tf.flags.DEFINE_float("keep_prob",0.7,'the num of unit will be kept')
 
 tf.flags.DEFINE_list('filter_sizes',[3,4,5],'the sizes of filter')
 
-def construct_estimator(bert_config,init_checkpoint,max_seq_len,num_class,train_steps,warm_up_steps):
+tf.flags.DEFINE_boolean('use_bilstm',True,'whether using bilstm')
+
+tf.flags.DEFINE_boolean('use_textcnn',False,'whether using textcnn')
+
+def construct_estimator(bert_config,
+                        init_checkpoint,
+                        max_seq_len,
+                        num_class,
+                        train_steps,
+                        warm_up_steps,
+                        use_bilstm,
+                        use_textcnn,
+                        lstm_unit,
+                        keep_prob,
+                        dense_unit
+                        ):
     model_fn=model_build_fn(bert_config_file=bert_config,
                             init_checkpoint=init_checkpoint,
-                            max_seq_length=max_seq_len)
+                            max_seq_length=max_seq_len,
+                            use_bilstm=use_bilstm,
+                            use_textcnn=use_textcnn,
+                            )
     run_config=RunConfig(model_dir=Flags.save_path,save_checkpoints_steps=Flags.save_checkpoints_steps)
 
     tf.logging.info('use normal estimator')
@@ -59,7 +83,10 @@ def construct_estimator(bert_config,init_checkpoint,max_seq_len,num_class,train_
                                              'filter_sizes':Flags.filter_sizes,
                                              'num_filter':Flags.num_filter,
                                              'train_steps':train_steps,
-                                             'warm_up_steps':warm_up_steps},
+                                             'warm_up_steps':warm_up_steps,
+                                             'lstm_unit':lstm_unit,
+                                             'keep_prob':keep_prob,
+                                             'dense_unit':dense_unit},
                                      config=run_config)
     return estimator
 
@@ -78,10 +105,14 @@ def get_eval_result(result,output_file,tokenizer,id2label):
             valid_input_ids=[input_id for input_id,mask in zip(input_ids,input_mask) if mask==1]
             tokens=tokenizer.convert_ids_to_tokens(valid_input_ids)
 
-            # print("*** the res info ***")
-            # print('res: %s' % res)
-
-            res_file.write('%s\t%s\t%s\t%s\n' % (' '.join(tokens),id2label[truth_label],id2label[label_pred[0]],label_proba[label_pred[0]]))
+            try:
+                res_file.write('%s\t%s\t%s\t%s\n' % (' '.join(tokens),id2label[truth_label],id2label[label_pred[0]],label_proba[label_pred[0]]))
+            except:
+                tf.logging.info("*** truth label is %s ***" % truth_label)
+                tf.logging.info('*** the label pred is %s ***' % label_pred)
+                tf.logging.info('*** the label proba is %s ***' % label_proba)
+                # tf.logging.info("*** the res info ***")
+                # tf.logging.info('res: %s' % res)
 
             if truth_label==label_pred:
                 correct+=1
@@ -92,7 +123,23 @@ def get_eval_result(result,output_file,tokenizer,id2label):
     return json.dumps(result)
 
 
-def train(bert_config,init_checkpoint,output_dir,tokenizer,summary_writer,train_path,dev_path,labels,num_class,train_steps,warm_up_steps,data_len):
+def train(bert_config,
+          init_checkpoint,
+          output_dir,
+          tokenizer,
+          summary_writer,
+          train_path,
+          dev_path,
+          labels,
+          num_class,
+          train_steps,
+          warm_up_steps,
+          data_len,
+          use_bilstm,
+          use_textcnn,
+          lstm_unit,
+          keep_prob,
+          dense_unit):
     max_seq_len=Flags.max_seq_len
     train_batch_size=Flags.train_batch_size
     eval_batch_size=Flags.eval_batch_size
@@ -119,7 +166,18 @@ def train(bert_config,init_checkpoint,output_dir,tokenizer,summary_writer,train_
     dp=DataProcessor(max_seq_len=Flags.max_seq_len)
 
     #构造估计器
-    estimator=construct_estimator(bert_config=bert_config,init_checkpoint=init_checkpoint,max_seq_len=max_seq_len,num_class=num_class,train_steps=train_steps,warm_up_steps=warm_up_steps)
+    estimator=construct_estimator(bert_config=bert_config,
+                                  init_checkpoint=init_checkpoint,
+                                  max_seq_len=max_seq_len,
+                                  num_class=num_class,
+                                  train_steps=train_steps,
+                                  warm_up_steps=warm_up_steps,
+                                  use_bilstm=use_bilstm,
+                                  use_textcnn=use_textcnn,
+                                  lstm_unit=lstm_unit,
+                                  keep_prob=keep_prob,
+                                  dense_unit=dense_unit,
+                                  )
 
     tf.logging.info('***** running training *****')
     tf.logging.info('num example=%d' % data_len)
@@ -190,7 +248,18 @@ def train(bert_config,init_checkpoint,output_dir,tokenizer,summary_writer,train_
     tf.logging.info('***** evaluate on the best checkpoint: %s *****' % best_checkpoint)
 
     #搭建最优的估计器
-    best_estimator=construct_estimator(bert_config,best_checkpoint,max_seq_len,num_class,train_steps,warm_up_steps)
+    best_estimator=construct_estimator(bert_config,
+                                       best_checkpoint,
+                                       max_seq_len,
+                                       num_class,
+                                       train_steps,
+                                       warm_up_steps,
+                                       use_bilstm=use_bilstm,
+                                       use_textcnn=use_textcnn,
+                                       lstm_unit=lstm_unit,
+                                       keep_prob=keep_prob,
+                                       dense_unit=dense_unit,
+                                       )
 
     result=best_estimator.predict(input_fn=dev_input_fn,yield_single_examples=True)
     eval_res=get_eval_result(result=result,output_file=output_dir,tokenizer=tokenizer,id2label=id2label_map)
@@ -223,6 +292,11 @@ def main(_):
     train_path=Flags.data_path+'toutiao_category_train.txt'
     dev_path=Flags.data_path+'toutiao_category_dev.txt'
     summary_file=os.path.join(output_dir,'result_summary.txt')
+
+    lstm_unit=Flags.lstm_unit
+    keep_prob=Flags.keep_prob
+    dense_unit=Flags.dense_unit
+
     with tf.gfile.Open(summary_file,'w') as summary:
         train(bert_config=bert_config_path,
               init_checkpoint=init_checkpoint,
@@ -235,7 +309,12 @@ def main(_):
               num_class=num_class,
               train_steps=train_steps,
               warm_up_steps=warm_up_steps,
-              data_len=data_len
+              data_len=data_len,
+              use_bilstm=True,
+              use_textcnn=False,
+              lstm_unit=lstm_unit,
+              keep_prob=keep_prob,
+              dense_unit=dense_unit,
               )
         summary.close()
 

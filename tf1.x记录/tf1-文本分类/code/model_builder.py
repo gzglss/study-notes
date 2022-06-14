@@ -8,7 +8,7 @@ except:
     from .optimization import *
 
 
-def model_build_fn(bert_config_file, init_checkpoint, max_seq_length):
+def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm, use_textcnn):
     def model_fn(features, labels, mode, params):
         """
         后面调用model_fn时，并没有传入参数这一步，网上说features和labels是由input_fn传入的
@@ -32,29 +32,32 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length):
         model, input_ids, input_mask, lengths = build_bert_base_model(bert_config, features, is_training,
                                                                       max_seq_length)
 
-        encoder_layers = [model.get_embedding_output()]  # 将bert的emb输出添加到encoder_layers
-        encoder_layers.extend(model.get_all_encoder_layers())  # 将bert的所有输出层添加到列表
+        last_layer_output = model.get_sequence_output()
+
+        # encoder_layers = [model.get_embedding_output()]  # 将bert的emb输出添加到encoder_layers
+        # encoder_layers.extend(model.get_all_encoder_layers())  # 将bert的所有输出层添加到列表
 
         # 这里使用了广播的功能，[batch_size,from_seq_len,1]*[batch_size,1,to_seq_len]->[batch_size,from_seq_len,to_seq_len]
         # 为维度值为1表示，对应维度所有的值都与该值相乘
-        attention_mask = create_attention_mask_from_input_mask(input_ids, input_mask)
+        # attention_mask = create_attention_mask_from_input_mask(input_ids, input_mask)
 
         # 使用bert的第0层作为输入，也就是微调每一层的参数
-        transformer_input = encoder_layers[1]
+        # transformer_input = encoder_layers[1]
 
         # 建立模型，得到模型的输出，只返回最后一层的输出
         # 做一些下游的微调任务，既可以使用cls的输出，也可以使用最后一层的输出
-        last_layer_output = transformer_model(
-            input_tensor=transformer_input,
-            attention_mask=attention_mask,
-            hidden_size=768,
-            num_hidden_layers=12,
-            intermediate_size=3072,
-            hidden_dropout_prob=bert_config.hidden_dropout_prob,
-            attention_probs_dropout_prob=bert_config.attention_probs_dropout_prob,
-            initializer_range=bert_config.initializer_range,
-            do_return_all_layers=False,
-        )
+        # 这里相当于在bert和textcnn之间的加了一个12层的transformer，所以不能这么写
+        # last_layer_output = transformer_model(
+        #     input_tensor=transformer_input,
+        #     attention_mask=attention_mask,
+        #     hidden_size=768,
+        #     num_hidden_layers=12,
+        #     intermediate_size=3072,
+        #     hidden_dropout_prob=bert_config.hidden_dropout_prob,
+        #     attention_probs_dropout_prob=bert_config.attention_probs_dropout_prob,
+        #     initializer_range=bert_config.initializer_range,
+        #     do_return_all_layers=False,
+        # )
 
         tvars = tf.trainable_variables()
         # 从bert原始模型中加载初始参数
@@ -68,10 +71,21 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length):
         # tf.logging.info('===========all vars=============')
         # for var in tvars:
         #     tf.logging.info('name=%s, shape=%s' % (var.name, var.shape))
+        logits, loss, pred, proba = None, None, None, None
+        if use_textcnn:
+            params['filter_sizes'] = [3, 4, 5]  # 发现输入得到的不对，这里暂时重新定义
+            logits, loss, pred, proba = textcnn_model(last_layer_output, params['num_class'], params['filter_sizes'],
+                                                      params['num_filter'], label_ids)
+        if use_bilstm:
+            loss, pred, proba, logits = bilstm(input_tensor=last_layer_output,
+                                               label_ids=label_ids,
+                                               lstm_unit=params['lstm_unit'],
+                                               keep_prob=params['keep_prob'],
+                                               dense_unit=params['dense_unit'],
+                                               num_class=params['num_class'])
 
-        params['filter_sizes'] = [3, 4, 5]  # 发现输入得到的不对，这里暂时重新定义
-        logits, loss, pred, proba = textcnn_model(last_layer_output, params['num_class'], params['filter_sizes'],
-                                                  params['num_filter'], label_ids)
+        if not use_bilstm and not use_textcnn:
+            raise AttributeError('you must input a downstream model type')
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             train_op = create_optimizer(loss=loss,
@@ -87,10 +101,12 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length):
 
         elif mode == tf.estimator.ModeKeys.EVAL:
             # tf.logging.info('*** the label is %s , and the pred is %s' % (labels,pred))
+            print('*** the pred is %s ***' % pred)
+            print('*** the label ids is %s ***' % label_ids)
             acc = tf.metrics.accuracy(labels=label_ids, predictions=pred)
             p = tf.metrics.precision(labels=label_ids, predictions=pred)
             r = tf.metrics.recall(labels=label_ids, predictions=pred)
-            #metrics里需要传入指标和update_op，如果要把f1加入的话可能要自建op，还不会哦
+            # metrics里需要传入指标和update_op，如果要把f1加入的话可能要自建op，还不会哦
             # a = tf.constant([2],dtype=tf.float32)
             # p=tf.cast(p,dtype=tf.float32)
             # r=tf.cast(r,dtype=tf.float32)
@@ -113,8 +129,8 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length):
                           'proba': tf.nn.softmax(logits),
                           'logits': logits,
                           'truth_label': label_ids,
-                          'input_ids':input_ids,
-                          'input_mask':input_mask,
+                          'input_ids': input_ids,
+                          'input_mask': input_mask,
                           }
 
             output_spec = tf.estimator.EstimatorSpec(

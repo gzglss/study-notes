@@ -147,10 +147,10 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu=F
         learning_rate = (
                 (1.0 - is_warmup) * learning_rate + is_warmup * warmup_learning_rate)
 
-    # It is recommended that you use this optimizer for fine tuning, since this
+    # It is recommended that you use this optimizer for fine-tuning, since this
     # is how the model was trained (note that the Adam m/v variables are NOT
     # loaded from init_checkpoint.)
-    optimizer = AdamWeightDecayOptimizer(
+    optimizer_bert = AdamWeightDecayOptimizer(
         learning_rate=learning_rate,
         weight_decay_rate=0.01,
         beta_1=0.9,
@@ -158,35 +158,50 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu=F
         epsilon=1e-6,
         exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"])
 
+    #下游任务的初始学习率设置为bert的10倍
+    optimizer_down=AdamWeightDecayOptimizer(
+        learning_rate=10.0*learning_rate,
+        weight_decay_rate=0.01,
+        beta_1=0.9,
+        beta_2=0.99,
+        epsilon=1e-6
+    )
+
+
     # if use_tpu:
     #     optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
     # if use_h:
     #     optimizer = hvd.DistributedOptimizer(optimizer)
     tvars = tf.trainable_variables()
+    bert_vars=[var for var in tvars if 'bert' in var.name]
+    down_vars=[var for var in tvars if 'bert' not in var.name]
 
-    # tf.logging.info('*** trainable variable ***')
-    # for var in tvars:
-    #     tf.logging.info("name:%s\t shape:%s" % (var.name,var.shape))
+    tf.logging.info('*** trainable bert ori variable ***')
+    for var in bert_vars:
+        tf.logging.info("name:%s\t shape:%s" % (var.name,var.shape))
 
-    grads = tf.gradients(loss, tvars)
+    tf.logging.info('*** trainable downstream variable ***')
+    for var in down_vars:
+        tf.logging.info("name:%s\t shape:%s" % (var.name, var.shape))
 
-    tf.logging.info('*** the grad of loss and vars ***')
-    try:
-        tf.logging.info(grads.eval())
-    except:
-        tf.logging.info("*** the way of printing is wrong!!! ***")
+
+    grads_bert = tf.gradients(loss, bert_vars)
+    grads_down=tf.gradients(loss,down_vars)
 
     # This is how the model was pre-trained.
-    (grads, _) = tf.clip_by_global_norm(grads, clip_norm=1.0)
+    (grads_bert, _) = tf.clip_by_global_norm(grads_bert, clip_norm=1.0)
+    (grads_down, _) = tf.clip_by_global_norm(grads_down,clip_norm=1.0)
 
-    train_op = optimizer.apply_gradients(
-        zip(grads, tvars), global_step=global_step)
+    train_op_bert = optimizer_bert.apply_gradients(
+        zip(grads_bert, bert_vars), global_step=global_step)
+
+    train_op_down=optimizer_down.apply_gradients(zip(grads_down,down_vars),global_step=global_step)
 
     # Normally the global step update is done inside of `apply_gradients`.
     # However, `AdamWeightDecayOptimizer` doesn't do this. But if you use
     # a different optimizer, you should probably take this line out.
     new_global_step = global_step + 1
-    train_op = tf.group(train_op, [global_step.assign(new_global_step)])
+    train_op = tf.group([train_op_bert,train_op_down], [global_step.assign(new_global_step)])
     return train_op
 
 class AdamWeightDecayOptimizer(tf.train.Optimizer):

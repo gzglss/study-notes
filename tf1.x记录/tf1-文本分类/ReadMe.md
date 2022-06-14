@@ -5,8 +5,16 @@
 
 介绍：
 
-基于estimator,使用bert+textcnn实现文本分类
+以estimator设计文本分类
 
 数据集：
 
 头条新闻数据集
+
+结果：
+
+| 下游网络    | batch_size | lr     | acc   |
+|---------|------------|--------|-------|
+| textcnn | 256        | warmup | 0.808 |
+| bilstm  | 128        | warmup | 0.889 |
+
