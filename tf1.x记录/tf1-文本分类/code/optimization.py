@@ -202,7 +202,7 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu=F
     # a different optimizer, you should probably take this line out.
     new_global_step = global_step + 1
     train_op = tf.group([train_op_bert,train_op_down], [global_step.assign(new_global_step)])
-    return train_op
+    return train_op,learning_rate
 
 class AdamWeightDecayOptimizer(tf.train.Optimizer):
     """A basic Adam optimizer that includes "correct" L2 weight decay."""

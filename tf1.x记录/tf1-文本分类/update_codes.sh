@@ -9,7 +9,7 @@ if [[ ! -d "dist" ]]; then
 fi
 
 bucket='fds://gzg/code_package'
-code_file='text-cls-2.0.tar.gz'
+code_file='text-cls-lexicon-1.0.tar.gz'
 
 rm -f code/*
 rm -f dist/*

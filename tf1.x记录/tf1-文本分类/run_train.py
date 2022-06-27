@@ -26,6 +26,8 @@ tf.flags.DEFINE_string('data_path','/fds/gzg/data/tnews','the path of data')
 
 tf.flags.DEFINE_string('save_path','/fds/gzg/model','the export path of model')
 
+tf.flags.DEFINE_integer("num_gpu",1,'the num of gpus')
+
 tf.flags.DEFINE_integer("train_batch_size",64,'train batch size')
 
 tf.flags.DEFINE_integer("eval_batch_size",64,'eval batch size')
@@ -54,6 +56,8 @@ tf.flags.DEFINE_boolean('use_bilstm',True,'whether using bilstm')
 
 tf.flags.DEFINE_boolean('use_textcnn',False,'whether using textcnn')
 
+tf.flags.DEFINE_boolean('use_lexicon',False,'whether using lexicon')
+
 def construct_estimator(bert_config,
                         init_checkpoint,
                         max_seq_len,
@@ -64,15 +68,27 @@ def construct_estimator(bert_config,
                         use_textcnn,
                         lstm_unit,
                         keep_prob,
-                        dense_unit
+                        dense_unit,
+                        use_lexicon,
+                        num_gpu
                         ):
     model_fn=model_build_fn(bert_config_file=bert_config,
                             init_checkpoint=init_checkpoint,
                             max_seq_length=max_seq_len,
                             use_bilstm=use_bilstm,
                             use_textcnn=use_textcnn,
+                            use_lexicon=use_lexicon,
                             )
-    run_config=RunConfig(model_dir=Flags.save_path,save_checkpoints_steps=Flags.save_checkpoints_steps)
+
+    if num_gpu>1:
+        strategy=tf.contrib.distribute.MirroredStrategy(num_gpu=num_gpu)
+        run_config=RunConfig(model_dir=Flags.save_path,
+                             save_checkpoints_steps=Flags.save_checkpoints_steps,
+                             train_distribute=strategy,
+                             eval_distribute=strategy)
+    else:
+        run_config=RunConfig(model_dir=Flags.save_path,
+                             save_checkpoints_steps=Flags.save_checkpoints_steps)
 
     tf.logging.info('use normal estimator')
     estimator=tf.estimator.Estimator(model_fn=model_fn,
@@ -105,14 +121,12 @@ def get_eval_result(result,output_file,tokenizer,id2label):
             valid_input_ids=[input_id for input_id,mask in zip(input_ids,input_mask) if mask==1]
             tokens=tokenizer.convert_ids_to_tokens(valid_input_ids)
 
-            try:
-                res_file.write('%s\t%s\t%s\t%s\n' % (' '.join(tokens),id2label[truth_label],id2label[label_pred[0]],label_proba[label_pred[0]]))
-            except:
-                tf.logging.info("*** truth label is %s ***" % truth_label)
-                tf.logging.info('*** the label pred is %s ***' % label_pred)
-                tf.logging.info('*** the label proba is %s ***' % label_proba)
-                # tf.logging.info("*** the res info ***")
-                # tf.logging.info('res: %s' % res)
+            # try:
+            res_file.write('%s\t%s\t%s\t%s\n' % (' '.join(tokens),id2label[truth_label],id2label[label_pred],label_proba[label_pred]))
+            # except:
+            #     tf.logging.info("*** truth label is %s ***" % truth_label)
+            #     tf.logging.info('*** the label pred is %s ***' % label_pred)
+            #     tf.logging.info('*** the label proba is %s ***' % label_proba)
 
             if truth_label==label_pred:
                 correct+=1
@@ -139,7 +153,9 @@ def train(bert_config,
           use_textcnn,
           lstm_unit,
           keep_prob,
-          dense_unit):
+          dense_unit,
+          num_gpu,
+          use_lexicon=False):
     max_seq_len=Flags.max_seq_len
     train_batch_size=Flags.train_batch_size
     eval_batch_size=Flags.eval_batch_size
@@ -163,7 +179,10 @@ def train(bert_config,
     dev_data=load_data(dev_path,shuffle=False)
 
     #数据包装
-    dp=DataProcessor(max_seq_len=Flags.max_seq_len)
+    if use_lexicon:
+        dp=LexiconDataProcessor(max_seq_len=max_seq_len,lexicon_input='word')
+    else:
+        dp=DataProcessor(max_seq_len=Flags.max_seq_len)
 
     #构造估计器
     estimator=construct_estimator(bert_config=bert_config,
@@ -177,6 +196,8 @@ def train(bert_config,
                                   lstm_unit=lstm_unit,
                                   keep_prob=keep_prob,
                                   dense_unit=dense_unit,
+                                  use_lexicon=use_lexicon,
+                                  num_gpu=num_gpu
                                   )
 
     tf.logging.info('***** running training *****')
@@ -194,7 +215,8 @@ def train(bert_config,
     #根据文件构造训练集的input_fn
     train_input_fn=file_base_input_fn_builder(input_file=train_file,
                                               max_seq_len=max_seq_len,
-                                              is_training=True)
+                                              is_training=True,
+                                              use_lexicon=use_lexicon)
 
     # dev_input_fn_list=[]
     # for dev_example in dev_data:
@@ -205,7 +227,8 @@ def train(bert_config,
     #构造评测集的input_fn
     dev_input_fn=input_fn_builder(features=dp.convert_example_to_features(dev_data,label2id_map,tokenizer),
                                   is_training=False,
-                                  max_seq_len=max_seq_len)
+                                  max_seq_len=max_seq_len,
+                                  use_lexicon=use_lexicon)
 
 
     best_ckpt_dir=os.path.join(output_dir,'best_checkpoint')
@@ -259,6 +282,8 @@ def train(bert_config,
                                        lstm_unit=lstm_unit,
                                        keep_prob=keep_prob,
                                        dense_unit=dense_unit,
+                                       use_lexicon=use_lexicon,
+                                       num_gpu=num_gpu
                                        )
 
     result=best_estimator.predict(input_fn=dev_input_fn,yield_single_examples=True)
@@ -288,7 +313,6 @@ def main(_):
     bert_config_path=Flags.ptm_path+'bert_config.json'
     init_checkpoint=Flags.ptm_path+'bert_model.ckpt'
     output_dir=Flags.save_path
-    tokenizer=FullTokenizer(vocab_path, do_lower_case=True)
     train_path=Flags.data_path+'toutiao_category_train.txt'
     dev_path=Flags.data_path+'toutiao_category_dev.txt'
     summary_file=os.path.join(output_dir,'result_summary.txt')
@@ -296,6 +320,14 @@ def main(_):
     lstm_unit=Flags.lstm_unit
     keep_prob=Flags.keep_prob
     dense_unit=Flags.dense_unit
+
+    use_lexicon=Flags.use_lexicon
+    if use_lexicon:
+        vocab_path=Flags.ptm_path+'lexicon_bert_vocab_42177.txt'
+        bert_config_path = Flags.ptm_path + 'lexicon_bert_config_42177_7_layers.json'
+        init_checkpoint = Flags.ptm_path + 'model.ckpt-343182'
+
+    tokenizer = FullTokenizer(vocab_path, do_lower_case=True)
 
     with tf.gfile.Open(summary_file,'w') as summary:
         train(bert_config=bert_config_path,
@@ -315,6 +347,8 @@ def main(_):
               lstm_unit=lstm_unit,
               keep_prob=keep_prob,
               dense_unit=dense_unit,
+              use_lexicon=use_lexicon,
+              num_gpu=Flags.num_gpu
               )
         summary.close()
 

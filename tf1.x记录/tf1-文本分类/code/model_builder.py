@@ -3,12 +3,14 @@ import tensorflow as tf
 try:
     from modeling import *
     from optimization import *
+    from LexiconBertModel import *
 except:
     from .modeling import *
     from .optimization import *
+    from .LexiconBertModel import *
 
 
-def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm, use_textcnn):
+def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm, use_textcnn,use_lexicon):
     def model_fn(features, labels, mode, params):
         """
         后面调用model_fn时，并没有传入参数这一步，网上说features和labels是由input_fn传入的
@@ -29,8 +31,11 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm
             label_ids = None
 
         bert_config = BertConfig.from_json_file(bert_config_file)
-        model, input_ids, input_mask, lengths = build_bert_base_model(bert_config, features, is_training,
-                                                                      max_seq_length)
+        if use_lexicon:
+            model, input_ids, input_mask, lengths=build_lexicon_bert_model(bert_config,features,is_training,max_seq_length)
+        else:
+            model, input_ids, input_mask, lengths = build_bert_base_model(bert_config, features, is_training,
+                                                                          max_seq_length)
 
         last_layer_output = model.get_sequence_output()
 
@@ -88,11 +93,14 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm
             raise AttributeError('you must input a downstream model type')
 
         if mode == tf.estimator.ModeKeys.TRAIN:
-            train_op = create_optimizer(loss=loss,
-                                        init_lr=params['init_learning_rate'],
-                                        num_train_steps=params['train_steps'],
-                                        num_warmup_steps=params['warm_up_steps'],
-                                        )
+            train_op, lr = create_optimizer(loss=loss,
+                                            init_lr=params['init_learning_rate'],
+                                            num_train_steps=params['train_steps'],
+                                            num_warmup_steps=params['warm_up_steps'],
+                                            )
+
+            print('* lr=%s *' % lr)
+
             output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
                 loss=loss,
@@ -101,8 +109,9 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm
 
         elif mode == tf.estimator.ModeKeys.EVAL:
             # tf.logging.info('*** the label is %s , and the pred is %s' % (labels,pred))
-            print('*** the pred is %s ***' % pred)
-            print('*** the label ids is %s ***' % label_ids)
+            # print('*** the pred is %s ***' % pred)
+            # print('*** the label ids is %s ***' % label_ids)
+            print("*** beginning to eval ***")
             acc = tf.metrics.accuracy(labels=label_ids, predictions=pred)
             p = tf.metrics.precision(labels=label_ids, predictions=pred)
             r = tf.metrics.recall(labels=label_ids, predictions=pred)
@@ -144,6 +153,7 @@ def model_build_fn(bert_config_file, init_checkpoint, max_seq_length, use_bilstm
 
 
 def build_bert_base_model(bert_config, features, is_training, max_seq_length):
+    print("***** use bert base model *****")
     tf.logging.debug("***features***")
     for name in sorted(features.keys()):
         tf.logging.debug('name=%s , shape=%s' % (name, features[name].shape))
@@ -164,3 +174,38 @@ def build_bert_base_model(bert_config, features, is_training, max_seq_length):
     )
 
     return model, input_ids, input_mask, lengths
+
+
+def build_lexicon_bert_model(bert_config, features, is_training, max_seq_length):
+    print('***** use lexicon bert base model *****')
+    tf.logging.debug("***features***")
+    for name in sorted(features.keys()):
+        tf.logging.debug('name=%s , shape=%s' % (name, features[name].shape))
+
+    input_ids = features['input_ids']
+    input_heads = features['input_heads']
+    input_tails = features['input_tails']
+    lengths = features['length']
+
+    ones = tf.ones_like(input_ids, dtype=tf.int32)
+    zeros = tf.zeros_like(input_ids, dtype=tf.int32)
+
+    token_type_ids = tf.where(condition=tf.equal(input_heads, input_tails),
+                              x=zeros,
+                              y=ones)
+
+    segment_ids = tf.zeros(get_shape_list(input_ids), dtype=tf.int32)
+    input_mask = tf.sequence_mask(lengths, maxlen=max_seq_length, dtype=tf.int32)
+    lexicon_model = LexiconBertModel(config=bert_config,
+                                     is_training=is_training,
+                                     input_ids=input_ids,
+                                     input_heads=input_heads,
+                                     input_tails=input_tails,
+                                     emb_init_method='char_word',
+                                     emb_process_method='span_head_tail_combine',
+                                     input_mask=input_mask,
+                                     token_type_ids=token_type_ids,
+                                     segment_ids=segment_ids,
+                                     use_one_hot_embedding=True,
+                                     )
+    return lexicon_model, input_ids, input_mask, lengths
