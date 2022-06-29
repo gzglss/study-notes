@@ -241,10 +241,17 @@ def train(bert_config,
         compare_fn=loss_smaller
     )
 
+    #早停
+    early_stopping=tf.estimator.experimental.stop_if_no_decrease_hook(estimator,
+                                                                      metric_name='loss',
+                                                                      max_steps_without_decrease=int(10*Flags.save_checkpoints_steps),
+                                                                      run_every_steps=int(Flags.save_checkpoints_steps))
+
     #包装input_fn
     train_spec=tf.estimator.TrainSpec(
         input_fn=train_input_fn,
-        max_steps=train_steps
+        max_steps=train_steps,
+        hooks=[early_stopping]
     )
 
     #指定测试集最优ckpt输出的位置
