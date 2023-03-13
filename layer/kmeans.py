@@ -25,7 +25,7 @@ def kmeans(data,cluster,iteration):
                 centerp=random.sample(data,k)
             pointlist=[[] for _ in range(k)]
             for i in data:
-                if i not in init_point:
+                if i not in centerp:
                     dist=[distance(i,j) for j in centerp]
                     minp=np.argmin(dist)
                     pointlist[minp].append(i)
@@ -35,8 +35,10 @@ def kmeans(data,cluster,iteration):
                     centerp[idx]=cp
                 else:
                     flag+=1
-            if flag==4 or _==iteration-1:
+            if flag==k or _==iteration-1:
                 kmeansres=pointlist
                 break
         all_center.append(kmeansres)
     return all_center
+
+all_center=[]
